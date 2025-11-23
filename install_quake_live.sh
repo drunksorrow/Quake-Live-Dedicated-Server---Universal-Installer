@@ -3,6 +3,7 @@
 # Quake Live Dedicated Server Universal Installer
 # Supports Ubuntu 16.04, 18.04, 20.04, 22.04, 24.04+
 # Author: Custom installer based on drunksorrow's work
+# Updated: 2025-11-23 - Fixed SteamCMD command order issue
 # 
 
 set -e
@@ -365,10 +366,21 @@ wget https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
 tar -xvzf steamcmd_linux.tar.gz
 rm steamcmd_linux.tar.gz
 
-./steamcmd.sh +login anonymous +force_install_dir /home/qlserver/steamcmd/steamapps/common/qlds/ +app_update 349090 +quit
+# First run to update SteamCMD itself
+./steamcmd.sh +quit
+
+# Now install Quake Live - IMPORTANT: force_install_dir MUST come BEFORE login!
+./steamcmd.sh +force_install_dir /home/qlserver/steamcmd/steamapps/common/qlds/ +login anonymous +app_update 349090 validate +quit
 EOSU
     
-    print_success "Quake Live Dedicated Server installed successfully."
+    # Verify installation
+    if [ -f /home/qlserver/steamcmd/steamapps/common/qlds/run_server_x64.sh ]; then
+        print_success "Quake Live Dedicated Server installed successfully."
+    else
+        print_error "Quake Live server files not found. Installation may have failed."
+        print_info "Check /home/qlserver/Steam/logs/stderr.txt for details."
+        return 1
+    fi
 }
 
 # Function to install minqlx
