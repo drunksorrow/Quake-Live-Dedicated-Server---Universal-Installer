@@ -1,3 +1,8 @@
+## 🚨 Latest Update (2025-11-23)
+     **Version 1.1** - Critical fix for SteamCMD installation failure. If you're experiencing installation errors, please use the latest version.
+     
+     [📥 Download Latest Version](https://github.com/drunksorrow/Quake-Live-Dedicated-Server---Universal-Installer/releases/latest)
+
 # Quake Live Dedicated Server - Universal Installer
 
 Automated installation script for Quake Live Dedicated Server with minqlx support on Ubuntu Server.
