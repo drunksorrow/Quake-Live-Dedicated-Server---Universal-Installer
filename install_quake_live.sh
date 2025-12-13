@@ -1,9 +1,10 @@
 #!/bin/bash
 #
 # Quake Live Dedicated Server Universal Installer
+# Version: 1.2
 # Supports Ubuntu 16.04, 18.04, 20.04, 22.04, 24.04+
 # Author: Custom installer based on drunksorrow's work
-# Updated: 2025-11-23 - Fixed SteamCMD command order issue
+# Updated: 2025-12-14 - Fixed Steam authentication (requires Steam account with Quake Live)
 # 
 
 set -e
@@ -65,9 +66,11 @@ check_timezone() {
     if [[ "$change_tz" =~ ^[Yy]$ ]]; then
         read -p "This script is optimized for 'Europe/Bucharest'. Set to Bucharest? (y/n): " use_bucharest
         if [[ "$use_bucharest" =~ ^[Yy]$ ]]; then
-            unlink /etc/localtime 2>/dev/null || true
-            ln -s /usr/share/zoneinfo/Europe/Bucharest /etc/localtime
-            print_success "Timezone set to Europe/Bucharest"
+            if timedatectl set-timezone "Europe/Bucharest" 2>/dev/null; then
+                print_success "Timezone set to Europe/Bucharest"
+            else
+                print_error "Failed to set timezone. You can set it manually later."
+            fi
         else
             print_info "Available timezones can be listed with: timedatectl list-timezones"
             read -p "Enter your desired timezone (e.g., America/New_York): " custom_tz
@@ -355,32 +358,188 @@ setup_qlserver_ssh() {
     fi
 }
 
+# Function to cleanup partial installation
+cleanup_partial_installation() {
+    print_warning "Performing cleanup of partial installation..."
+    
+    # Stop any running processes
+    pkill -u qlserver 2>/dev/null || true
+    sleep 2
+    
+    # Remove qlserver user and home
+    if id "qlserver" &>/dev/null; then
+        print_info "Removing qlserver user..."
+        userdel -r qlserver 2>/dev/null || true
+        rm -rf /home/qlserver 2>/dev/null || true
+    fi
+    
+    # Remove Samba user
+    smbpasswd -x qlserver 2>/dev/null || true
+    
+    # Remove sudoers entry
+    if grep -q "qlserver ALL = NOPASSWD: ALL" /etc/sudoers; then
+        sed -i '/qlserver ALL = NOPASSWD: ALL/d' /etc/sudoers
+    fi
+    
+    # Clean Samba config
+    if [ -f /etc/samba/smb.conf ]; then
+        cp /etc/samba/smb.conf /etc/samba/smb.conf.backup.$(date +%Y%m%d_%H%M%S) 2>/dev/null || true
+        sed -i '/^\[homes\]/,/^directory mask = 0755$/d' /etc/samba/smb.conf 2>/dev/null || true
+        sed -i '/^\[www\]/,/^directory mask = 0755$/d' /etc/samba/smb.conf 2>/dev/null || true
+        systemctl restart smbd 2>/dev/null || /etc/init.d/samba restart 2>/dev/null || true
+    fi
+    
+    print_success "Cleanup completed. You can run the installer again anytime."
+}
+
 # Function to install SteamCMD and Quake Live
 install_quake_server() {
     print_info "Installing SteamCMD and Quake Live Dedicated Server..."
+    echo ""
     
-    su - qlserver << 'EOSU'
+    # Main authentication loop
+    while true; do
+        print_warning "IMPORTANT: You must own Quake Live on your Steam account to download the server files."
+        print_info "Steam no longer allows anonymous downloads for Quake Live."
+        echo ""
+        echo "Authentication options:"
+        echo "  1. Enter Steam password (visible on screen)"
+        echo "  2. Enter Steam password (hidden with asterisks)"
+        echo "  3. Cancel installation and cleanup"
+        echo ""
+        
+        read -p "Choose option (1/2/3): " steam_option
+        
+        case $steam_option in
+            1|2)
+                # Get Steam username (always visible)
+                read -p "Enter your Steam username: " STEAM_USER
+                
+                if [ -z "$STEAM_USER" ]; then
+                    print_error "Username cannot be empty."
+                    continue
+                fi
+                
+                # Get password based on option
+                if [ "$steam_option" = "1" ]; then
+                    # Visible password
+                    read -p "Enter your Steam password (visible): " STEAM_PASS
+                else
+                    # Hidden password with asterisks simulation
+                    echo -n "Enter your Steam password (hidden): "
+                    STEAM_PASS=""
+                    while IFS= read -r -s -n1 char; do
+                        if [[ $char == $'\0' ]]; then
+                            break
+                        elif [[ $char == $'\177' ]] || [[ $char == $'\b' ]]; then
+                            # Backspace
+                            if [ ${#STEAM_PASS} -gt 0 ]; then
+                                STEAM_PASS="${STEAM_PASS%?}"
+                                echo -ne "\b \b"
+                            fi
+                        else
+                            STEAM_PASS+="$char"
+                            echo -n "*"
+                        fi
+                    done
+                    echo ""
+                fi
+                
+                if [ -z "$STEAM_PASS" ]; then
+                    print_error "Password cannot be empty."
+                    continue
+                fi
+                
+                # Attempt Steam authentication and download
+                print_info "Attempting to authenticate with Steam and download Quake Live..."
+                print_info "If you have Steam Guard Mobile Auth, approve the login on your phone."
+                
+                # Create temporary script for su command
+                cat > /tmp/steam_install.sh << EOSTEAM
+#!/bin/bash
 mkdir -p ~/steamcmd
 cd ~/steamcmd
-wget https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-tar -xvzf steamcmd_linux.tar.gz
-rm steamcmd_linux.tar.gz
+
+# Download SteamCMD if not exists
+if [ ! -f steamcmd.sh ]; then
+    wget https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
+    tar -xvzf steamcmd_linux.tar.gz
+    rm steamcmd_linux.tar.gz
+fi
 
 # First run to update SteamCMD itself
 ./steamcmd.sh +quit
 
 # Now install Quake Live - IMPORTANT: force_install_dir MUST come BEFORE login!
-./steamcmd.sh +force_install_dir /home/qlserver/steamcmd/steamapps/common/qlds/ +login anonymous +app_update 349090 validate +quit
-EOSU
-    
-    # Verify installation
-    if [ -f /home/qlserver/steamcmd/steamapps/common/qlds/run_server_x64.sh ]; then
-        print_success "Quake Live Dedicated Server installed successfully."
-    else
-        print_error "Quake Live server files not found. Installation may have failed."
-        print_info "Check /home/qlserver/Steam/logs/stderr.txt for details."
-        return 1
-    fi
+./steamcmd.sh +force_install_dir /home/qlserver/steamcmd/steamapps/common/qlds/ +login "$STEAM_USER" "$STEAM_PASS" +app_update 349090 validate +quit
+exit \$?
+EOSTEAM
+                
+                chmod +x /tmp/steam_install.sh
+                
+                # Run as qlserver user
+                if su - qlserver -c "/tmp/steam_install.sh"; then
+                    rm -f /tmp/steam_install.sh
+                    
+                    # Verify installation
+                    if [ -f /home/qlserver/steamcmd/steamapps/common/qlds/run_server_x64.sh ]; then
+                        print_success "Quake Live Dedicated Server installed successfully!"
+                        return 0
+                    else
+                        print_error "Server files not found after installation."
+                        print_info "This usually means authentication failed or you don't own Quake Live."
+                    fi
+                else
+                    rm -f /tmp/steam_install.sh
+                    print_error "SteamCMD authentication or download failed."
+                    print_info "Common reasons:"
+                    echo "  • Incorrect username or password"
+                    echo "  • You don't own Quake Live on this Steam account"
+                    echo "  • Steam Guard approval was not completed (if using Mobile Auth)"
+                    echo "  • Network connection issues"
+                fi
+                
+                # Ask if user wants to retry
+                echo ""
+                read -p "Do you want to try again with different credentials? (y/n): " retry
+                
+                if [[ ! "$retry" =~ ^[Yy]$ ]]; then
+                    echo ""
+                    read -p "Are you sure you want to cancel? Type 'yes' to confirm: " confirm_cancel
+                    
+                    if [ "$confirm_cancel" = "yes" ]; then
+                        print_warning "Installation cancelled by user."
+                        cleanup_partial_installation
+                        exit 1
+                    else
+                        print_info "Returning to authentication options..."
+                        continue
+                    fi
+                fi
+                ;;
+                
+            3)
+                # Cancel installation
+                echo ""
+                print_warning "This will remove all files installed so far and exit the installer."
+                read -p "Are you sure? Type 'yes' to confirm: " confirm_abort
+                
+                if [ "$confirm_abort" = "yes" ]; then
+                    cleanup_partial_installation
+                    print_info "Installation cancelled. You can run this installer again anytime."
+                    exit 1
+                else
+                    print_info "Continuing with installation..."
+                    continue
+                fi
+                ;;
+                
+            *)
+                print_error "Invalid option. Please choose 1, 2, or 3."
+                continue
+                ;;
+        esac
+    done
 }
 
 # Function to install minqlx
