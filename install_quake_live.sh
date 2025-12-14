@@ -663,6 +663,7 @@ autostart=true
 autorestart=true
 stderr_logfile=/var/log/quake.err.log
 stdout_logfile=/var/log/quake.out.log
+stopsignal=HUP
 EOCONF
 
 print_success "Supervisor configuration created."
