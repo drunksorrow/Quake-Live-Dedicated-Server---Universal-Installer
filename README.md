@@ -1,7 +1,10 @@
-## 🚨 Latest Update (2025-11-23)
-     **Version 1.1** - Critical fix for SteamCMD installation failure. If you're experiencing installation errors, please use the latest version.
-     
-     [📥 Download Latest Version](https://github.com/drunksorrow/Quake-Live-Dedicated-Server---Universal-Installer/releases/latest)
+## 🚨 Latest Update (2025-12-14)
+
+**Version 1.2** - Enhanced Steam authentication with visible/hidden password options and retry logic. Requires Steam account with Quake Live.
+
+**Tested on:** Ubuntu 24.04 LTS (should work on 16.04, 18.04, 20.04, 22.04)
+
+[📥 Download Latest Version](https://github.com/drunksorrow/Quake-Live-Dedicated-Server---Universal-Installer/releases/latest)
 
 # Quake Live Dedicated Server - Universal Installer
 
